@@ -1,15 +1,21 @@
+/* eslint-disable no-undef */
 /* eslint-disable no-unused-vars */
-import express, { urlencoded } from "express";
+import express from "express";
 import dotenv from "dotenv";
-import db from './config/db.js'
-import users from "./model/users.js";
+import db from './config/db.js';
+import userRoutes from "./Router/userRoutes.js";
+import cors from "cors";
 dotenv.config();
 db();
 
 const app = express();
-app.use(express.urlencoded);
+app.use(cors({ origin: '*' }));
 app.use(express.json());
+app.use("/api/user", userRoutes);
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, (req, res) => {
+app.get("/", (req, res) => {
+  res.send(`server started at port ${PORT}`);
+});
+app.listen(PORT, () => {
   console.log(`server started at port ${PORT}`);
 });

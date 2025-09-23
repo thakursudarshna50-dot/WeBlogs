@@ -1,0 +1,163 @@
+Absolutely! Here’s a clear summary of **all the issues you faced** while trying to push your code to GitHub and how we addressed them:
+
+---
+
+# Summary of Issues & Solutions During Your Git Push Process
+
+---
+
+### 1. **No remote named `origin`**
+
+**Issue:**
+When running:
+
+```bash
+git remote set-url origin https://github.com/thakursudarshna50-dot/WeBlogs.git
+```
+
+You got:
+
+```
+error: No such remote 'origin'
+```
+
+**Why?**
+Because your local Git repository did not have a remote called `origin` set up yet.
+
+**Solution:**
+Add the remote instead of setting URL:
+
+```bash
+git remote add origin https://github.com/thakursudarshna50-dot/WeBlogs.git
+```
+
+---
+
+### 2. **Push blocked by GitHub Push Protection due to secrets**
+
+**Issue:**
+When pushing your branch with:
+
+```bash
+git push --set-upstream origin Sudarshna
+```
+
+GitHub rejected your push due to **repository rules**, specifically:
+
+```
+Push cannot contain secrets
+- Google OAuth Client ID and Secret found in .env file in commit afe3b61e497e28e0665e5359aa0b736f43918480
+```
+
+**Why?**
+GitHub detected sensitive credentials (OAuth client ID and secret) committed inside `.env`.
+
+**Solution:**
+Secrets should never be committed. The fix involves:
+
+* Removing `.env` from the entire Git history.
+* Adding `.env` to `.gitignore`.
+* Force pushing the cleaned history.
+
+---
+
+### 3. **`git filter-repo` must be run from Git repo root**
+
+**Issue:**
+Running
+
+```bash
+git filter-repo --path .env --invert-paths
+```
+
+from a folder not containing `.git` gave:
+
+```
+fatal: not a git repository (or any of the parent directories): .git
+```
+
+**Why?**
+`git filter-repo` must be run inside the Git repository root (where `.git` folder exists).
+
+**Solution:**
+Navigate to the correct repo root (in your case, `backend` folder), then run the command.
+
+---
+
+### 4. **`git filter-repo` aborts because repo is not a fresh clone**
+
+**Issue:**
+
+```
+Aborting: Refusing to destructively overwrite repo history since
+this does not look like a fresh clone.
+...
+Please operate on a fresh clone instead. If you want to proceed anyway, use --force.
+```
+
+**Why?**
+`git filter-repo` is cautious about rewriting history on repos that aren't freshly cloned.
+
+**Solution:**
+Add the `--force` flag to override the safety check:
+
+```bash
+git filter-repo --path .env --invert-paths --force
+```
+
+---
+
+### 5. **After filtering, remote `origin` disappeared**
+
+**Issue:**
+
+When trying to push after rewriting history, you got:
+
+```
+fatal: 'origin' does not appear to be a git repository
+fatal: Could not read from remote repository.
+```
+
+**Why?**
+The remote named `origin` was removed or lost during the history rewrite process.
+
+**Solution:**
+Re-add the remote URL:
+
+```bash
+git remote add origin https://github.com/thakursudarshna50-dot/WeBlogs.git
+```
+
+Then push:
+
+```bash
+git push --force --set-upstream origin Sudarshna
+```
+
+---
+
+# Recap of Key Commands Used to Fix Issues:
+
+```bash
+# Add remote if missing
+git remote add origin https://github.com/thakursudarshna50-dot/WeBlogs.git
+
+# Remove .env from all commits forcibly
+git filter-repo --path .env --invert-paths --force
+
+# Add .env to .gitignore
+echo ".env" >> .gitignore
+git add .gitignore
+git commit -m "Add .env to .gitignore"
+
+# Force push cleaned history
+git push --force --set-upstream origin Sudarshna
+```
+
+---
+
+# Final Notes
+
+* You must **revoke** the leaked OAuth secrets in your Google Developer Console and generate new ones because they were pushed in your commit history.
+* Going forward, always add secrets like `.env` files to `.gitignore` **before** committing.
+* Use tools like GitHub’s secret scanning to detect leaks early.
