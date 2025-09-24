@@ -1,11 +1,12 @@
 /* eslint-disable no-undef */
 import dotenv from 'dotenv';
-dotenv.config();
+import cookie from 'cookie';
 import jwt from 'jsonwebtoken';
 import User from '../model/users.js';
 import bcrypt from 'bcrypt';
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
+import cookieParser from 'cookie-parser';
 
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
@@ -31,40 +32,59 @@ passport.use(new GoogleStrategy({
   }
 ));
 
-// Helper function for standard success response
+
 function successResponse(res, data, message = 'Success', statusCode = 200) {
   return res.status(statusCode).json({ success: true, message, data });
 }
 
-// Helper function for standard error response
 function errorResponse(res, message = 'Error', statusCode = 400) {
   return res.status(statusCode).json({ success: false, message });
 }
 
-export async function googleSignup(req, res) {
-  // eslint-disable-next-line no-unused-vars
-  passport.authenticate('google', { session: false }, async (err, user, info) => {
-    if (err) return errorResponse(res, 'Authentication error', 500);
-    if (!user) return errorResponse(res, 'Invalid credentials', 400);
 
-    try {
-      
-        const existingUser=await User.findOne({googleId:user.id});
-        if(existingUser){
-            const jwtToken=jwt.sign({id:existingUser._id,name:existingUser.name,role:existingUser.role},process.env.JWT_SECRET,{expiresIn:"2h"});
-            return successResponse(res, { token: jwtToken }, 'Login successful');
-        }else{
-            const newUser=await User.create({name:user.name,email:user.email,googleId:user.id,password:"",role:["READER"]});
-            const jwtToken=jwt.sign({id:newUser._id,name:newUser.name,role:newUser.role},process.env.JWT_SECRET,{expiresIn:"2h"});
-            return successResponse(res, { token: jwtToken }, 'Login successful');
-        }
-      
-    } catch (e) {
-      console.error(e);
-      return errorResponse(res, 'Token generation failed', 500);
-    }
-  })(req, res);
+export async function googleSignup(req, res) {
+  const user = req.user;
+
+  if (!user) {
+    return res.redirect('http://localhost:5173/signup'); 
+  }
+
+  const token = jwt.sign(
+    { id: user._id, name: user.name, role: user.role },
+    process.env.JWT_SECRET,
+    { expiresIn: '2h' }
+  );
+
+  const refreshToken = jwt.sign(
+    { id: user._id, name: user.name, role: user.role },
+    process.env.REFRESH_TOKEN_SECRET,
+    { expiresIn: '7h' }
+  );
+
+  const cookieOptions = {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    maxAge: 7200000 
+  };
+  
+  const refreshTokenOptions = {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    maxAge: 3600000 *7
+  };
+  const cookieString = cookie.serialize('token', token, cookieOptions);
+  const refreshTokenString = cookie.serialize('refreshToken', refreshToken, refreshTokenOptions);
+
+  res.clearCookie('token');
+  res.clearCookie('refreshToken');
+  res.cookie('token', cookieString, cookieOptions);
+  res.cookie('refreshToken', refreshTokenString, refreshTokenOptions);
+  console.log("token",token);
+  res.redirect('http://localhost:5173/home');
 }
+
 
 export async function userRegister(req, res) {
   try {
@@ -95,7 +115,7 @@ export async function userRegister(req, res) {
       { expiresIn: '2h' }
     );
 
-    return successResponse(res, { token: jwtToken }, 'Registration successful', 201);
+    return successResponse(res, { token: jwtToken ,user:{name:newUser.name,email:newUser.email,role:newUser.role}}, 'Registration successful', 201);
   } catch (error) {
     console.error(error);
     return errorResponse(res, 'Internal server error', 500);
@@ -106,15 +126,24 @@ export async function userLogin(req, res) {
   try {
     const { email, password } = req.body;
     if (!email?.trim() || !password?.trim()) {
-      return errorResponse(res, 'Email and password are required', 400);
+      if(!email){
+        return errorResponse(res, 'Email is required', 400);
+      }
+      if(!password){
+        return errorResponse(res, 'Password is required', 400);
+      }
     }
 
     const user = await User.findOne({ email });
     if (!user) {
       return errorResponse(res, 'User not found', 404);
     }
-
-    const isMatch = await user.comparePassword(password);
+    
+    if (user.googleId!='')
+    {
+       return  errorResponse(res, 'Please login with google', 404);
+    }
+    const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return errorResponse(res, 'Invalid credentials', 401);
     }
@@ -124,6 +153,23 @@ export async function userLogin(req, res) {
       process.env.JWT_SECRET,
       { expiresIn: '2h' }
     );
+    const refreshToken = jwt.sign(
+      { id: user._id, name: user.name, role: user.role },
+      process.env.REFRESH_TOKEN_SECRET,
+      { expiresIn: '7h' }
+    );
+    const cookieOptions = {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      maxAge: 3600000*7
+    };
+    const cookieString = cookie.serialize('token', token, cookieOptions);
+    const cookieString2 = cookie.serialize('refreshToken', refreshToken, cookieOptions);
+    res.clearCookie('token');
+    res.clearCookie('refreshToken');
+    res.cookie('token', cookieString, cookieOptions);
+    res.cookie('refreshToken', cookieString2, cookieOptions);
 
     return successResponse(res, { token: jwtToken }, 'Login successful');
   } catch (error) {
@@ -134,7 +180,7 @@ export async function userLogin(req, res) {
 
 export async function userProfile(req, res) {
   try {
-    const user = await User.findById(req.user.id).select('-password'); // exclude password
+    const user = await User.findById(req.query.id).select('-password'); 
     if (!user) {
       return errorResponse(res, 'User not found', 404);
     }
@@ -203,3 +249,93 @@ export async function deleteUserById(req, res) {
     return errorResponse(res, 'Internal server error', 500);
   }
 }
+export async function logout(req, res) {
+  try {
+    res.clearCookie('token');
+    return successResponse(res, 'Logout successful');
+  } catch (error) {
+    console.error(error);
+    return errorResponse(res, 'Internal server error', 500);
+  }
+}
+
+export async function refreshToken(req, res) {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+    if (!refreshToken) {
+      return errorResponse(res, 'No refresh token found', 401);
+    }
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return errorResponse(res, 'User not found', 404);
+    }
+    const jwtToken = jwt.sign(
+      { id: user._id, name: user.name, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '2h' }
+    );
+    const cookieOptions = {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      maxAge: 3600000 *7
+    };
+    const cookieString = cookie.serialize('token', token, cookieOptions);
+    const cookieString2 = cookie.serialize('refreshToken', refreshToken, cookieOptions);
+    res.clearCookie('token');
+    res.clearCookie('refreshToken');
+    res.cookie('token', cookieString, cookieOptions);
+    res.cookie('refreshToken', cookieString2, cookieOptions);
+    return successResponse(res, { token: jwtToken }, 'Refresh token successful');
+  }
+  catch(error)
+  {
+    console.error(error);
+    return errorResponse(res, 'Internal server error', 500);
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
