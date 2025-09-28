@@ -61,28 +61,38 @@ export async function googleSignup(req, res) {
     { expiresIn: '7h' }
   );
 
+  const isProd = process.env.NODE_ENV === 'production';
   const cookieOptions = {
     httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    maxAge: 7200000 
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    maxAge: 7200000 // 2h
   };
-  
   const refreshTokenOptions = {
     httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    maxAge: 3600000 *7
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    maxAge: 3600000 * 7 // 7h
   };
-  const cookieString = cookie.serialize('token', token, cookieOptions);
-  const refreshTokenString = cookie.serialize('refreshToken', refreshToken, refreshTokenOptions);
 
   res.clearCookie('token');
   res.clearCookie('refreshToken');
-  res.cookie('token', cookieString, cookieOptions);
-  res.cookie('refreshToken', refreshTokenString, refreshTokenOptions);
+  res.cookie('token', token, cookieOptions);
+  res.cookie('refreshToken', refreshToken, refreshTokenOptions);
+  res.cookie(
+    'user',
+    JSON.stringify({ name: user.name, email: user.email, role: user.role }),
+    {
+      httpOnly: false,                 
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+      maxAge: 2 * 60 * 60 * 1000       
+    }
+  );
   console.log("token",token);
   res.redirect('http://localhost:5173/home');
+  res.json({ success: true, message: 'Google login successful', data: { token, refreshToken,user:{name:user.name,email:user.email,role:user.role} } });
 }
 
 
@@ -114,7 +124,7 @@ export async function userRegister(req, res) {
       process.env.JWT_SECRET,
       { expiresIn: '2h' }
     );
-
+    res.cookie('toast','Registration successful');
     return successResponse(res, { token: jwtToken ,user:{name:newUser.name,email:newUser.email,role:newUser.role}}, 'Registration successful', 201);
   } catch (error) {
     console.error(error);
@@ -136,15 +146,36 @@ export async function userLogin(req, res) {
 
     const user = await User.findOne({ email });
     if (!user) {
+      res.cookie('toast', 'Email not found plese try signing up ', {
+        httpOnly: false,
+        path: '/',
+        sameSite: 'lax',
+        // Express expects maxAge in milliseconds; keep this toast visible for ~3 minutes
+        maxAge: 3 * 60 * 1000 
+      });
       return errorResponse(res, 'User not found', 404);
     }
     
     if (user.googleId!='')
     {
+       res.clearCookie('toast');
+       res.cookie('toast', 'Please login with google', {
+         httpOnly: false,
+         path: '/',
+         sameSite: 'lax',
+         // Express expects maxAge in milliseconds; keep this toast visible for ~3 minutes
+         maxAge: 3 * 60 * 1000 
+       });
        return  errorResponse(res, 'Please login with google', 404);
     }
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
+      res.cookie('toast', 'Invalid Credentials-Wrong password', {
+        httpOnly: false,
+        path: '/',
+        sameSite: 'lax',
+        maxAge: 60 * 3 *1000
+      });
       return errorResponse(res, 'Invalid credentials', 401);
     }
 
@@ -158,20 +189,35 @@ export async function userLogin(req, res) {
       process.env.REFRESH_TOKEN_SECRET,
       { expiresIn: '7h' }
     );
-    const cookieOptions = {
+    const isProd = process.env.NODE_ENV === 'production';
+    const accessCookieOptions = {
       httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      maxAge: 3600000*7
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 3600000 * 2 
     };
-    const cookieString = cookie.serialize('token', token, cookieOptions);
-    const cookieString2 = cookie.serialize('refreshToken', refreshToken, cookieOptions);
+    const refreshCookieOptions = {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 3600000 * 7     
+    };
     res.clearCookie('token');
+    res.clearCookie('toast');
     res.clearCookie('refreshToken');
-    res.cookie('token', cookieString, cookieOptions);
-    res.cookie('refreshToken', cookieString2, cookieOptions);
 
-    return successResponse(res, { token: jwtToken }, 'Login successful');
+    // Mirror toast cookie behavior consistently
+    res.cookie('toast', 'Login successful', {
+      httpOnly: false,
+      path: '/',
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 3 * 60 * 1000
+    });
+    res.cookie('token', jwtToken, accessCookieOptions);
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+    
+
+    return successResponse(res, { token: jwtToken,user:{name:user.name,email:user.email,role:user.role} }, 'Login successful');
   } catch (error) {
     console.error(error);
     return errorResponse(res, 'Internal server error', 500);
@@ -252,6 +298,7 @@ export async function deleteUserById(req, res) {
 export async function logout(req, res) {
   try {
     res.clearCookie('token');
+    res.clearCookie('refreshToken');
     return successResponse(res, 'Logout successful');
   } catch (error) {
     console.error(error);
@@ -275,18 +322,23 @@ export async function refreshToken(req, res) {
       process.env.JWT_SECRET,
       { expiresIn: '2h' }
     );
-    const cookieOptions = {
+    const isProd = process.env.NODE_ENV === 'production';
+    const accessCookieOptions = {
       httpOnly: true,
-      secure: true,
-      sameSite: 'none',
-      maxAge: 3600000 *7
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 3600000 * 2 // 2h
     };
-    const cookieString = cookie.serialize('token', token, cookieOptions);
-    const cookieString2 = cookie.serialize('refreshToken', refreshToken, cookieOptions);
+    const refreshCookieOptions = {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 3600000 * 7 // 7h
+    };
     res.clearCookie('token');
     res.clearCookie('refreshToken');
-    res.cookie('token', cookieString, cookieOptions);
-    res.cookie('refreshToken', cookieString2, cookieOptions);
+    res.cookie('token', jwtToken, accessCookieOptions);
+    res.cookie('refreshToken', refreshToken, refreshCookieOptions);
     return successResponse(res, { token: jwtToken }, 'Refresh token successful');
   }
   catch(error)

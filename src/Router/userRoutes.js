@@ -31,7 +31,7 @@ passport.use(new GoogleStrategy({
   }
 ));
 
-router.get('/auth/google', passport.authenticate('google', {  scope: ['profile', 'email'] ,prompt:'select_account'   })  );
+router.get('/auth/google', passport.authenticate('google', {  scope: ['profile', 'email']   })  );
 router.post('/signup',userRegister)
 router.get('/google/callback',passport.authenticate('google', { session: false }),googleSignup)
 router.post('/login',userLogin)
